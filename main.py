@@ -1,146 +1,129 @@
-import pyttsx3
+from flask import Flask, render_template, request, send_file
+from gtts import gTTS
+import openai
 import speech_recognition as sr
+import pyttsx3
 import datetime
 import wikipedia
 import webbrowser
-import os
-import smtplib
+from api_secret import API_KEY
 
-engine = pyttsx3.init('sapi5')
-voices = engine.getProperty('voices')
-engine.setProperty('voice', voices[0].id)
+app = Flask(__name__)
+
+openai.api_key = API_KEY
+engine = pyttsx3.init()
+
+r = sr.Recognizer()
+mic = sr.Microphone()
+print(sr.Microphone.list_microphone_names())
+
+user_name = "Rupesh"
 
 
-def speak(audio):
-    engine.say(audio)
-    engine.runAndWait()
-
+def speak(text):
+    print(text)
+    tts = gTTS(text=text, lang='en')
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    output_file = f'static/audio/output_{timestamp}.mp3'
+    audio_file = output_file
+    tts.save(audio_file)
+    return audio_file
 
 def wishme():
     hour = datetime.datetime.now().hour
     if 6 <= hour < 12:
-        speak("Good morning rupesh!")
+         return "Good morning rupesh!, I am Lily. Please tell me how may I help you"
     elif 12 <= hour < 16:
-        speak("Good afternoon rupesh!")
+        return "Good Afternoon rupesh!, I am Lily. Please tell me how may I help you"
     elif 16 <= hour < 20:
-        speak("Good evening rupesh!")
+        return "Good evening rupesh!, I am Lily. Please tell me how may I help you" 
     else:
-        speak("Good night rupesh!")
-    speak("I am Jarvis. Please tell me how may I help you")
+        return "Good night rupesh!, I am Lily. Please tell me how may I help you"
+    
+def openWikipedia(query):
+    query = query.replace("wikipedia", "")
+    results = wikipedia.summary(query, sentences=2)
+    return results
+
+def openYoutube(query):
+    bannedWord = ['open', 'on', 'youtube']
+    url = ' '.join(i for i in query.split() if i not in bannedWord)
+    youtubeURL = 'https://www.youtube.com/results?search_query=' + url.lower().replace(" ", "")
+    webbrowser.open(youtubeURL)
+    return url
+
+def openGoogle(query):
+    bannedWord = ['open', 'on', 'google']
+    url = ' '.join(i for i in query.split() if i not in bannedWord)
+    webbrowser.open(url)  
+    return url 
 
 
+@app.route('/')
+def index():
+    message = wishme()
+    audio_file = speak(message)
+    return render_template('first.html', audio_file=audio_file,message=message, text=True)
 
-def takeCommand():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Listening..")
-        r.pause_threshold = 1
+@app.route('/process', methods=['POST'])
+def process():
+    conversation = ''
+    with mic as source:
+        print("Listening...")
+        r.adjust_for_ambient_noise(source)
         audio = r.listen(source)
+        print("No longer listening")
 
-        try:
-            print("Recognizing..")
-            query = r.recognize_google(audio, language="en-in")
-            print(f"User said: {query}\n")
-        except Exception as e:
-            print(e)
-            print("Please say that again..")
-            return "none"
-        return query
-
-
-def sendEmail(to, subject, content):
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.ehlo()
-    server.starttls()
-    server.login('rpesh889676@gmail.com', "sowrujkdvlozwzvi")
-    email_message = f"Subject: {subject}\n\n{content}"
-    server.sendmail("rpesh889676@gmail.com", to, email_message)
-    server.close()
-
-
-if __name__ == "__main__":
-    wishme()
-    while True:
-        query = takeCommand().lower()
+    try:
+        user_input = r.recognize_google(audio)
+        print("User input: " + user_input)
+    
+        query = user_input.lower()
         if "wikipedia" in query:
-            speak("Searching Wikipedia...")
-            query = query.replace("wikipedia", "")
-            results = wikipedia.summary(query, sentences=2)
-            speak("According to Wikipedia")
-            speak(results)
-
+            results = openWikipedia(query)
+            audio_file = speak("According to Wikipedia" + results)
+            return render_template('first.html', audio_file=audio_file,text=True, response=results)
+        
         elif "youtube" in query:
-            bannedWord = ['open', 'on', 'youtube']
-            url = ' '.join(i for i in query.split() if i not in bannedWord)
-            youtubeURL = 'https://www.youtube.com/results?search_query=' + url.lower().replace(" ", "")
-            webbrowser.open(youtubeURL)
+            youtubeUrl = openYoutube(query)
+            audio_file = speak(f'Opening {youtubeUrl} on Youtube')
+            return render_template('first.html', audio_file=audio_file,)
 
-        elif "open google" in query:
-            webbrowser.open("https://google.com")
+        
+        elif "google" in query:
+            searchUrl = openGoogle(query)
+            audio_file = speak(f'Opening {searchUrl} on Google')
+            return render_template('first.html', audio_file=audio_file)
 
-        elif "open stackoverflow" in query:
-            webbrowser.open("https://stackoverflow.com")
-
-        elif "open telegram" in query:
-            webbrowser.open("https://telegram.org")
-
-        elif "the time" in query:
-            strTime = datetime.datetime.now().strftime("%H:%M:%S")
-            speak(f"Sir, the time is {strTime}")
 
         elif "thank you" in query:
-            speak("You're welcome. Goodbye!")
-            break
+            audio_file = speak("You're welcome sir, it's been a great time with you")
+            return render_template('first.html', audio_file=audio_file)
 
-        elif "play music" in query:
-            music_dir = 'D://music'
-            songs = os.listdir(music_dir)
-            print(songs)
-            os.startfile(os.path.join(music_dir, songs[0]))
+    
+        elif user_input != '' :
+            prompt = user_name + ":" + user_input + "\nBot"
+            conversation += prompt
+            response = openai.Completion.create(engine='text-davinci-001', prompt=conversation, max_tokens=50)
+            response_str = response.choices[0].text.replace("\n", "").replace(",", "")
+            if user_name + ":" in response_str and "Bot:" in response_str:
+                response_str = response_str.split(user_name + ":", 1)[1].split("Bot:", 1)[0]
 
-        elif "open code" in query:
-            code_path = "C:\\Program Files\\JetBrains\\PyCharm Community Edition 2022.2.2\\bin\\pycharm64.exe"
-            os.startfile(code_path)
+            conversation += response_str + "\n"
+            audio_file = speak(response_str)
+            return render_template('first.html', audio_file=audio_file, response=response_str)
+    
+    except Exception as e:
+        print(e)
+        audio_file = speak("Sorry, I couldn't understand.")
+        return render_template('first.html', audio_file=audio_file)
+     
+@app.route('/play')
+def play():
+    audio_file = request.args.get('file')
+    if audio_file:
+        return send_file(audio_file, mimetype='audio/mpeg')
 
-        elif "email to omkar" in query:
-            try:
-                speak("What is the subject of the email?")
-                subject = takeCommand()
-                speak("What should I say?")
-                content = takeCommand()
-                to = "onkar_potdar_mech@moderncoe.edu.in"
-                sendEmail(to, subject, content)
-                speak("Email has been sent.")
-            except Exception as e:
-                print(e)
-                speak("Sorry, I couldn't send the email.")
-
-        elif "email to rupesh" in query:
-            try:
-                speak("What is the subject of the email?")
-                subject = takeCommand()
-                speak("What should I say?")
-                content = takeCommand()
-                to = "Rupeshlokhande4954@gmail.com"
-                sendEmail(to, subject, content)
-                speak("Email has been sent.")
-            except Exception as e:
-                print(e)
-                speak("Sorry, I couldn't send the email.")
-
-        elif "i want to send an email" in query:
-            try:
-                speak("Tell us your email name without @gmail.com?")
-                to = takeCommand().lower().replace(" ", "")
-                emailTo = to+"@gmail.com"
-                speak("What is the subject of the email?")
-                subject = takeCommand()
-                speak("What should I say?")
-                content = takeCommand()
-                sendEmail(emailTo, subject, content)
-                speak("Email has been sent.")
-
-            except Exception as e:
-                print(e)
-                speak("Sorry, I couldn't send the email.")
-
+if __name__ == '__main__':
+    app.run(debug=True)
+   
