@@ -26,7 +26,7 @@ def speak(text):
     print(text)
     tts = gTTS(text=text, lang='en')
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    output_file = f'static/audio/output_{timestamp}.mp3'
+    output_file = f'static/assets/audio/output_{timestamp}.mp3'
     audio_file = output_file
     tts.save(audio_file)
     return audio_file
